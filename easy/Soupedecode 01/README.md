@@ -1,4 +1,4 @@
-# Machine Name / Challenge Name
+# Soupedecode 01
 
 **Platform:** THM  
 **Difficulty:** Easy  
