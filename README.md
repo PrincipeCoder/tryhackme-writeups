@@ -7,11 +7,8 @@ This repository contains my personal write-ups for machines and rooms from TryHa
 ## Machines
 
 ### Easy
-- Blue
-- Basic Pentesting
+- Soupecode 01
 
 ### Medium
-- Overpass
 
 ### Hard
-- Coming soon
